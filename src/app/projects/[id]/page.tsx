@@ -14,6 +14,7 @@ import PointCanvas from '@/components/points/PointCanvas'
 import PointFormModal from '@/components/points/PointFormModal'
 import PointsTable from '@/components/points/PointsTable'
 import { usePdfPreview } from '@/components/pdf/usePdfPreview'
+import { exportProjectCSV, exportProjectZip } from '@/lib/export'
 
 
 type ProjectWithLists = Project & { lists: ProjectList[] }
@@ -238,13 +239,31 @@ export default function ProjectDetailPage() {
           </label>
 
           {/* Exportar CSV (placeholder) */}
-          <button
-            className="rounded-md border px-3 py-2 text-sm"
-            onClick={() => alert('Próximamente: exportar CSV')}
-            title="Exportar CSV"
-          >
-            Exportar
-          </button>
+          {/* Exportar */}
+          <div className="relative">
+            <details className="group">
+              <summary className="cursor-pointer rounded-md border px-3 py-2 text-sm">
+                Exportar
+              </summary>
+              <div className="absolute right-0 z-10 mt-1 w-56 rounded-md border bg-background p-1 shadow">
+                <button
+                  type="button"
+                  className="block w-full rounded px-3 py-2 text-left text-sm hover:bg-white/10"
+                  onClick={() => exportProjectCSV(projectId)}
+                >
+                  CSV (todas las tablas)
+                </button>
+                <button
+                  type="button"
+                  className="block w-full rounded px-3 py-2 text-left text-sm hover:bg-white/10"
+                  onClick={() => exportProjectZip(projectId)}
+                >
+                  ZIP (CSV + imágenes anotadas + manifest)
+                </button>
+              </div>
+            </details>
+          </div>
+
 
           {/* Eliminar proyecto */}
           <button

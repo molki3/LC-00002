@@ -551,3 +551,7 @@ export async function updatePointName(pointId: string, name: string) {
 export async function deletePointEntry(id: string) {
   await db.pointEntries.delete(id)
 }
+
+export async function getPointEntriesByPoint(pointId: string) {
+  return db.pointEntries.where({ pointId }).toArray()
+}
