@@ -1,84 +1,322 @@
 'use client'
+import React, { useRef, useState } from 'react'
 
-/**
- * COMPONENTE: PointCanvas
- * --------------------------------------------
- * - Muestra una imagen (Asset tipo image)
- * - Detecta clics para crear puntos (x, y normalizados)
- * - Renderiza los puntos existentes sobre la imagen
- */
+type Pin = { id: string; x: number; y: number; name?: string }
 
-import React, { useRef, useState, useEffect } from 'react'
-import type { Point } from '@/types/models'
-
-type PointCanvasProps = {
-  assetUrl: string           // URL temporal (ObjectURL o blob:)
+type Props = {
+  assetUrl: string
   assetId: string
-  points: Point[]
-  onAddPoint?: (coords: { x: number; y: number }) => void
-  onSelectPoint?: (point: Point) => void
+  points: Pin[] | any[]
+  onAddPoint?: (pos: { x: number; y: number }) => void
+  onSelectPoint?: (p: any) => void
+  onDeletePoint?: (p: any) => void
 }
 
 export default function PointCanvas({
   assetUrl,
+  assetId,
   points,
   onAddPoint,
   onSelectPoint,
-}: PointCanvasProps) {
+  onDeletePoint,
+}: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const imgRef = useRef<HTMLImageElement | null>(null)
-  const [dimensions, setDimensions] = useState({ w: 0, h: 0 })
 
-  // 🔹 Detectar tamaño de imagen al cargar
-  useEffect(() => {
-    const img = imgRef.current
-    if (!img) return
-    const handleLoad = () => {
-      setDimensions({ w: img.width, h: img.height })
-    }
-    img.addEventListener('load', handleLoad)
-    return () => img.removeEventListener('load', handleLoad)
-  }, [assetUrl])
+  const [natural, setNatural] = useState({ w: 0, h: 0 })
+  const [scale, setScale] = useState(1)
+  const [tx, setTx] = useState(0)
+  const [ty, setTy] = useState(0)
 
-  // 🔹 Manejar clic sobre el contenedor
-  const handleClick = (e: React.MouseEvent) => {
-    const rect = (containerRef.current as HTMLElement).getBoundingClientRect()
-    const x = (e.clientX - rect.left) / rect.width
-    const y = (e.clientY - rect.top) / rect.height
-    if (onAddPoint) onAddPoint({ x, y })
+  const dragRef = useRef({ active: false, x: 0, y: 0, tx0: 0, ty0: 0 })
+  const pointers = useRef<Map<number, { x: number; y: number }>>(new Map())
+  const pinchRef = useRef<{
+    active: boolean
+    startDist: number
+    startScale: number
+    // centro del gesto en coords contenedor (px)
+    cx: number
+    cy: number
+  }>({ active: false, startDist: 0, startScale: 1, cx: 0, cy: 0 })
+
+  const MIN_SCALE = 0.5
+  const MAX_SCALE = 8
+
+  const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v))
+
+  const handleImgLoad: React.ReactEventHandler<HTMLImageElement> = (e) => {
+    const img = e.currentTarget
+    const w = img.naturalWidth
+    const h = img.naturalHeight
+    setNatural({ w, h })
+
+    const cont = containerRef.current
+    if (!cont) return
+    const fit = cont.clientWidth / w
+    setScale(fit)
+
+    const contentH = h * fit
+    const dy = (cont.clientHeight - contentH) / 2
+    setTx(0)
+    setTy(dy > 0 ? dy : 0)
   }
 
-  // 🔹 Renderizar puntos posicionados relativamente
-  const renderPoints = () =>
-    points.map((p) => (
-      <div
-        key={p.id}
-        onClick={(e) => {
-          e.stopPropagation()
-          onSelectPoint?.(p)
-        }}
-        className="absolute w-4 h-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-rose-500 cursor-pointer hover:scale-110 transition-transform"
-        style={{
-          left: `${p.x * 100}%`,
-          top: `${p.y * 100}%`,
-        }}
-        title={`(${p.x.toFixed(2)}, ${p.y.toFixed(2)})`}
-      />
-    ))
+  const clientToNormalized = (clientX: number, clientY: number) => {
+    const cont = containerRef.current
+    if (!cont) return { x: 0, y: 0 }
+    const rect = cont.getBoundingClientRect()
+    const x = clientX - rect.left
+    const y = clientY - rect.top
+    const ix = (x - tx) / scale
+    const iy = (y - ty) / scale
+    const nx = natural.w ? ix / natural.w : 0
+    const ny = natural.h ? iy / natural.h : 0
+    return { x: clamp(nx, 0, 1), y: clamp(ny, 0, 1) }
+  }
+
+  // -------- Desktop zoom (rueda / doble click)
+  const onWheel: React.WheelEventHandler<HTMLDivElement> = (e) => {
+    e.preventDefault()
+    const cont = containerRef.current
+    if (!cont) return
+
+    const delta = -e.deltaY
+    const factor = Math.exp(delta * 0.0015)
+    const newScale = clamp(scale * factor, MIN_SCALE, MAX_SCALE)
+
+    const rect = cont.getBoundingClientRect()
+    const cx = e.clientX - rect.left
+    const cy = e.clientY - rect.top
+
+    const nx = (cx - tx) / scale
+    const ny = (cy - ty) / scale
+
+    setScale(newScale)
+    setTx(cx - nx * newScale)
+    setTy(cy - ny * newScale)
+  }
+
+  const onDoubleClick: React.MouseEventHandler<HTMLDivElement> = (e) => {
+    const cont = containerRef.current
+    if (!cont) return
+    const rect = cont.getBoundingClientRect()
+    const cx = e.clientX - rect.left
+    const cy = e.clientY - rect.top
+    const newScale = clamp(scale * 1.5, MIN_SCALE, MAX_SCALE)
+    const nx = (cx - tx) / scale
+    const ny = (cy - ty) / scale
+    setScale(newScale)
+    setTx(cx - nx * newScale)
+    setTy(cy - ny * newScale)
+  }
+
+  // -------- Pan (mouse)
+  const onMouseDown: React.MouseEventHandler<HTMLDivElement> = (e) => {
+    if ((e.target as HTMLElement).dataset.pin === '1') return
+    dragRef.current.active = true
+    dragRef.current.x = e.clientX
+    dragRef.current.y = e.clientY
+    dragRef.current.tx0 = tx
+    dragRef.current.ty0 = ty
+    e.currentTarget.style.cursor = 'grabbing'
+  }
+  const onMouseMove: React.MouseEventHandler<HTMLDivElement> = (e) => {
+    if (!dragRef.current.active) return
+    const dx = e.clientX - dragRef.current.x
+    const dy = e.clientY - dragRef.current.y
+    setTx(dragRef.current.tx0 + dx)
+    setTy(dragRef.current.ty0 + dy)
+  }
+  const endDrag = (el: HTMLDivElement | null) => {
+    dragRef.current.active = false
+    if (el) el.style.cursor = ''
+  }
+  const onMouseUp: React.MouseEventHandler<HTMLDivElement> = (e) => endDrag(e.currentTarget)
+  const onMouseLeave: React.MouseEventHandler<HTMLDivElement> = (e) => endDrag(e.currentTarget)
+
+  // -------- Click fondo → agregar punto
+  const onClickBg: React.MouseEventHandler<HTMLDivElement> = (e) => {
+    // evitar click tras pan
+    if (Math.abs(e.movementX) > 2 || Math.abs(e.movementY) > 2) return
+    if ((e.target as HTMLElement).dataset.pin === '1') return
+    onAddPoint?.(clientToNormalized(e.clientX, e.clientY))
+  }
+
+  // -------- Pinch-to-zoom (pointer events)
+  const onPointerDown: React.PointerEventHandler<HTMLDivElement> = (e) => {
+    // permitir clicks en pines
+    if ((e.target as HTMLElement).dataset.pin === '1') return
+    ;(e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId)
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+
+    if (pointers.current.size === 1) {
+      // pan con un dedo
+      dragRef.current.active = true
+      dragRef.current.x = e.clientX
+      dragRef.current.y = e.clientY
+      dragRef.current.tx0 = tx
+      dragRef.current.ty0 = ty
+    } else if (pointers.current.size === 2) {
+      // inicia pinch
+      const [p1, p2] = Array.from(pointers.current.values())
+      const dx = p2.x - p1.x
+      const dy = p2.y - p1.y
+      const dist = Math.hypot(dx, dy)
+
+      const rect = e.currentTarget.getBoundingClientRect()
+      const cx = (p1.x + p2.x) / 2 - rect.left
+      const cy = (p1.y + p2.y) / 2 - rect.top
+
+      pinchRef.current.active = true
+      pinchRef.current.startDist = dist
+      pinchRef.current.startScale = scale
+      pinchRef.current.cx = cx
+      pinchRef.current.cy = cy
+
+      // dejar de panear si había 1 dedo activo
+      dragRef.current.active = false
+    }
+  }
+
+  const onPointerMove: React.PointerEventHandler<HTMLDivElement> = (e) => {
+    if (!pointers.current.has(e.pointerId)) return
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+
+    if (pinchRef.current.active && pointers.current.size >= 2) {
+      const [p1, p2] = Array.from(pointers.current.values())
+      const dx = p2.x - p1.x
+      const dy = p2.y - p1.y
+      const dist = Math.hypot(dx, dy)
+      const factor = dist / (pinchRef.current.startDist || 1)
+      const newScale = clamp(pinchRef.current.startScale * factor, MIN_SCALE, MAX_SCALE)
+
+      // mantener el centro del gesto estable
+      const cx = pinchRef.current.cx
+      const cy = pinchRef.current.cy
+      const nx = (cx - tx) / scale
+      const ny = (cy - ty) / scale
+
+      setScale(newScale)
+      setTx(cx - nx * newScale)
+      setTy(cy - ny * newScale)
+      return
+    }
+
+    // pan con un dedo
+    if (dragRef.current.active && pointers.current.size === 1) {
+      const p = pointers.current.get(e.pointerId)!
+      const dx = p.x - dragRef.current.x
+      const dy = p.y - dragRef.current.y
+      setTx(dragRef.current.tx0 + dx)
+      setTy(dragRef.current.ty0 + dy)
+    }
+  }
+
+  const onPointerUpOrCancel: React.PointerEventHandler<HTMLDivElement> = (e) => {
+    pointers.current.delete(e.pointerId)
+    if (pointers.current.size < 2) pinchRef.current.active = false
+    if (pointers.current.size === 0) dragRef.current.active = false
+    try { (e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId) } catch {}
+  }
+
+  // -------- Utilidades UI
+  const resetView = () => {
+    const cont = containerRef.current
+    const img = imgRef.current
+    if (!cont || !img) return
+    const fit = cont.clientWidth / img.naturalWidth
+    setScale(fit)
+    const contentH = img.naturalHeight * fit
+    const dy = (cont.clientHeight - contentH) / 2
+    setTx(0)
+    setTy(dy > 0 ? dy : 0)
+  }
+  const zoomIn = () => setScale((s) => Math.min(s * 1.25, MAX_SCALE))
+  const zoomOut = () => setScale((s) => Math.max(s / 1.25, MIN_SCALE))
 
   return (
-    <div
-      ref={containerRef}
-      onClick={handleClick}
-      className="relative inline-block w-full cursor-crosshair select-none"
-    >
-      <img
-        ref={imgRef}
-        src={assetUrl}
-        alt="Asset"
-        className="w-full h-auto rounded-md shadow-md"
-      />
-      {renderPoints()}
+    <div className="w-full">
+      {/* Controles */}
+      <div className="mb-2 flex items-center gap-2">
+        <button type="button" className="rounded border px-2 py-1 text-sm" onClick={zoomOut}>−</button>
+        <span className="text-xs tabular-nums">{scale.toFixed(2)}x</span>
+        <button type="button" className="rounded border px-2 py-1 text-sm" onClick={zoomIn}>＋</button>
+        <button type="button" className="rounded border px-2 py-1 text-sm" onClick={resetView}>Ajustar</button>
+      </div>
+
+      {/* Viewport (touch-action none para permitir pinch/pan) */}
+      <div
+        ref={containerRef}
+        className="relative h-[70vh] w-full overflow-hidden rounded border bg-black/5 touch-none"
+        onWheel={onWheel}
+        onDoubleClick={onDoubleClick}
+        onMouseDown={onMouseDown}
+        onMouseMove={onMouseMove}
+        onMouseUp={onMouseUp}
+        onMouseLeave={onMouseLeave}
+        onClick={onClickBg}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUpOrCancel}
+        onPointerCancel={onPointerUpOrCancel}
+      >
+        {/* Capa transformada: imagen + puntos en la MISMA capa */}
+        <div
+          className="absolute left-0 top-0 will-change-transform"
+          style={{ transform: `translate(${tx}px, ${ty}px) scale(${scale})`, transformOrigin: '0 0' }}
+        >
+          <img
+            ref={imgRef}
+            src={assetUrl}
+            alt="asset"
+            draggable={false}
+            onLoad={handleImgLoad}
+            className="block select-none pointer-events-none"
+          />
+
+          {/* Pins */}
+          {natural.w > 0 && points.map((p: any) => (
+            <button
+              key={p.id}
+              data-pin="1"
+              type="button"
+              className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full bg-rose-500 shadow"
+              style={{ left: (p.x ?? 0) * natural.w, top: (p.y ?? 0) * natural.h, width: 14, height: 14, outline: '2px solid rgba(0,0,0,0.35)' }}
+              title={p.name ?? 'Punto'}
+              onClick={(e) => {
+                e.stopPropagation()
+                if (e.altKey && onDeletePoint) return onDeletePoint(p)
+                onSelectPoint?.(p)
+              }}
+            />
+          ))}
+        </div>
+        {/* === Overlay NO transformado para etiquetas legibles === */}
+          {natural.w > 0 && (
+            <div className="pointer-events-none absolute inset-0">
+              {points.map((p: any) => {
+                // coords a pantalla (NO escaladas)
+                const sx = tx + (p.x ?? 0) * natural.w * scale
+                const sy = ty + (p.y ?? 0) * natural.h * scale
+
+                if (!p.name) return null
+                return (
+                  <div
+                    key={`lbl-${p.id}`}
+                    className="absolute -translate-x-1/2 -translate-y-2 whitespace-nowrap rounded bg-black/70 px-2 py-0.5 text-[11px] text-white shadow"
+                    style={{
+                      left: sx,
+                      top: sy,
+                    }}
+                    title={p.name}
+                  >
+                    {p.name}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+      </div>
     </div>
   )
 }
