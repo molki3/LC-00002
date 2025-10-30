@@ -14,7 +14,7 @@ type Props = {
 
 export default function PointCanvas({
   assetUrl,
-  assetId,
+  // assetId,
   points,
   onAddPoint,
   onSelectPoint,
@@ -280,7 +280,7 @@ export default function PointCanvas({
               key={p.id}
               data-pin="1"
               type="button"
-              className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full bg-rose-500 shadow"
+              className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full bg-rose-500 shadow mb-5"
               style={{ left: (p.x ?? 0) * natural.w, top: (p.y ?? 0) * natural.h, width: 14, height: 14, outline: '2px solid rgba(0,0,0,0.35)' }}
               title={p.name ?? 'Punto'}
               onClick={(e) => {

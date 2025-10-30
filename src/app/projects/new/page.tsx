@@ -15,7 +15,7 @@
  *  - createProjectWithLists() para crear proyecto + snapshots
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { getLists, createProjectWithLists } from '@/lib/db/local'
 import type { List, Property, PropertyOption } from '@/types/models'

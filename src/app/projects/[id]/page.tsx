@@ -5,8 +5,8 @@ import { useParams, useRouter } from 'next/navigation'
 import {
   getProjectById, deleteProject,
   createImageAssetFromFile, getAssetsByProject, deleteAsset,
-  createPdfAssetFromFile, addPoint, getPointsByAsset, updatePoint, deletePoint,
-  getEntriesByPoint
+  createPdfAssetFromFile, addPoint, getPointsByAsset, deletePoint,
+  
 } from '@/lib/db/local'
 import type { Project, ProjectList, Asset, Point } from '@/types/models'
 import { ensurePdfWorker } from '@/lib/pdf'

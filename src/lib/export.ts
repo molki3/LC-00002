@@ -7,10 +7,10 @@ import {
   db,
   getProjectById,
   getAssetsByProject,
-  getPointsByAsset,
-  getPointEntriesByPoint, // Asegúrate de tener este helper en local.ts
+  
+   // Asegúrate de tener este helper en local.ts
 } from '@/lib/db/local'
-import type { Project, Asset, Point } from '@/types/models'
+import type { Asset, Point } from '@/types/models'
 
 /** Descargar un Blob con nombre */
 function downloadBlob(blob: Blob, filename: string) {

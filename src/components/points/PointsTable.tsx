@@ -19,14 +19,14 @@ type Props = {
 
 export default function PointsTable({ points, projectLists, onEdit, onDelete }: Props) {
   // Mapa rápido: listId -> { propId -> SnapshotProperty }
-  const propMapByList: Record<string, Record<string, SnapshotProperty>> = React.useMemo(() => {
-    const out: Record<string, Record<string, SnapshotProperty>> = {}
-    for (const pl of projectLists) {
-      out[pl.id] = {}
-      for (const sp of pl.properties) out[pl.id][sp.id] = sp
-    }
-    return out
-  }, [projectLists])
+  // const propMapByList: Record<string, Record<string, SnapshotProperty>> = React.useMemo(() => {
+  //   const out: Record<string, Record<string, SnapshotProperty>> = {}
+  //   for (const pl of projectLists) {
+  //     out[pl.id] = {}
+  //     for (const sp of pl.properties) out[pl.id][sp.id] = sp
+  //   }
+  //   return out
+  // }, [projectLists])
 
   if (points.length === 0) {
     return <p className="mt-3 text-xs text-gray-500">No hay puntos.</p>

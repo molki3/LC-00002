@@ -312,14 +312,14 @@ export async function createProjectWithLists(input: CreateProjectInput): Promise
         })
       }
 
-      const pl: ProjectList = {
-        id: rid(),
-        projectId,
-        listId: baseList.id,
-        listName: baseList.name,
-        properties: snapshotProps.sort((a, b) => a.order - b.order),
-        order: order++,
-      }
+      // const pl: ProjectList = {
+      //   id: rid(),
+      //   projectId,
+      //   listId: baseList.id,
+      //   listName: baseList.name,
+      //   properties: snapshotProps.sort((a, b) => a.order - b.order),
+      //   order: order++,
+      // }
 
       await db.projectLists.add({
         id: typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2),
