@@ -132,7 +132,7 @@ export default function HomePage() {
         {!loadingProjects && projects.length === 0 ? (
           <div className="rounded border p-4 text-sm text-gray-600">
             Aún no tienes proyectos. Crea el primero con
-            <span className="mx-1 font-semibold">“+ Nuevo Proyecto”</span>.
+            <span className="mx-1 font-semibold">+</span>
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
