@@ -20,7 +20,8 @@ import type {
   ISODate,
   Asset,
   Point,
-  PointEntry
+  PointEntry,
+  PointFile
 } from '@/types/models'
 import { ensurePdfWorker } from '@/lib/pdf'
 
@@ -45,6 +46,8 @@ export class LocalDB extends Dexie {
 
   pointEntries!: Table<PointEntry, string>
 
+  pointFiles!: Dexie.Table<PointFile, string>
+
   constructor() {
     super('ixpin_local')
 
@@ -66,6 +69,28 @@ export class LocalDB extends Dexie {
     this.version(3).stores({
       assets: 'id, projectId, kind, createdAt'
     })
+    this.version(4).stores({
+      points: 'id, projectId, assetId, createdAt',
+      pointEntries: 'id, pointId, listId, createdAt',
+    })
+
+    this.version(5).stores({
+      pointFiles: 'id, pointId, entryId, propertyId, createdAt',
+    })
+
+    this.lists = this.table('lists')
+    this.properties = this.table('properties')
+    this.options = this.table('options')
+
+    this.projects = this.table('projects')
+    this.projectLists = this.table('projectLists')
+
+    this.assets = this.table('assets')
+
+    this.points = this.table('points')
+    this.pointEntries = this.table('pointEntries')
+
+    this.pointFiles = this.table('pointFiles')
   }
 }
 
@@ -449,7 +474,7 @@ export async function createPdfAssetFromFile(projectId: string, file: File): Pro
 /*-----------
 ------ PUNTOS
 ---------- */ 
-db.version(7).stores({
+db.version(8).stores({
   lists: '++id, name, createdAt, updatedAt',
   properties: '++id, listId, order',
   options: '++id, propertyId, order',
@@ -458,6 +483,7 @@ db.version(7).stores({
   assets: '++id, projectId',
   points: '++id, projectId, assetId, listId',
   pointEntries: '++id, pointId, listId, createdAt',
+  pointFiles: 'id, pointId, entryId, propertyId, createdAt',
 }).upgrade(async (tx) => {
   // set default name if missing (opcional)
   const pts = await tx.table('points').toArray()
@@ -555,3 +581,46 @@ export async function deletePointEntry(id: string) {
 export async function getPointEntriesByPoint(pointId: string) {
   return db.pointEntries.where({ pointId }).toArray()
 }
+
+export async function getFilesByEntryAndProp(entryId: string, propertyId: string) {
+  return db.pointFiles
+    .where({ entryId, propertyId })
+    .toArray()
+}
+
+export async function addFileToEntry(params: {
+  pointId: string
+  entryId: string
+  propertyId: string
+  file: File   // viene del input file
+}) {
+  const id = crypto.randomUUID()
+  const blob = params.file
+  const now = new Date().toISOString()
+
+  await db.pointFiles.add({
+    id,
+    pointId: params.pointId,
+    entryId: params.entryId,
+    propertyId: params.propertyId,
+    filename: params.file.name,
+    mime: params.file.type || 'application/octet-stream',
+    blob,
+    createdAt: now,
+  })
+
+  return id
+}
+
+export async function deleteFile(fileId: string) {
+  await db.pointFiles.delete(fileId)
+}
+
+export async function getFilesByPoint(pointId: string): Promise<PointFile[]> {
+  return db.pointFiles.where('pointId').equals(pointId).toArray()
+}
+
+export async function getFilesByEntry(entryId: string): Promise<PointFile[]> {
+  return db.pointFiles.where('entryId').equals(entryId).toArray()
+}
+

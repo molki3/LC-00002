@@ -2,27 +2,28 @@
 
 import React, { useEffect, useMemo, useState } from 'react'
 import Modal from '@/components/ui/Modal'
-import type { SnapshotProperty, Point, ProjectList, PointEntry } from '@/types/models'
+import type { SnapshotProperty, Point, ProjectList, PointEntry, PointFile } from '@/types/models'
 import {
-  getEntriesByPoint, addPointEntry, updatePointEntry, deletePointEntry, updatePointName
+  getEntriesByPoint, addPointEntry, updatePointEntry, deletePointEntry, updatePointName, 
+  getFilesByEntryAndProp, deleteFile, addFileToEntry
 } from '@/lib/db/local'
 
-export type PointValues = Record<string, string | number | string[]>
+  export type PointValues = Record<string, string | number | string[]>
 
-type Props = {
-  open: boolean
-  onClose: () => void
-  title?: string
-  point: Point
-  projectLists: ProjectList[]          // 👈 listas disponibles del proyecto
-  resetKey?: string | number
-  onDeletePoint?: () => Promise<void>  // 👈 callback para borrar el punto
-  onPointUpdated?: (id: string) => void
-}
+  type Props = {
+    open: boolean
+    onClose: () => void
+    title?: string
+    point: Point
+    projectLists: ProjectList[]          // 👈 listas disponibles del proyecto
+    resetKey?: string | number
+    onDeletePoint?: () => Promise<void>  // 👈 callback para borrar el punto
+    onPointUpdated?: (id: string) => void
+  }
 
-export default function PointFormModal({
-  open, onClose, title = 'Registros del punto', point, projectLists, resetKey, onDeletePoint, onPointUpdated
-}: Props) {
+  export default function PointFormModal({
+    open, onClose, title = 'Registros del punto', point, projectLists, resetKey, onDeletePoint, onPointUpdated
+  }: Props) {
   const [entries, setEntries] = useState<PointEntry[]>([])
   const [mode, setMode] = useState<'create' | 'edit'>('create')
   const [editing, setEditing] = useState<PointEntry | null>(null)
@@ -30,6 +31,7 @@ export default function PointFormModal({
   const [values, setValues] = useState<PointValues>(empty)
   const [pointName, setPointName] = useState(point.name ?? '')
   const [savingName, setSavingName] = useState(false)
+  const [filesByProp, setFilesByProp] = useState<Record<string, PointFile[]>>({})
 
   // Lista elegida para el registro actual
   const [selectedListId, setSelectedListId] = useState<string>(() =>
@@ -51,17 +53,39 @@ export default function PointFormModal({
     return () => { alive = false }
   }, [open, point.id, resetKey])
 
-  // Reset editor cuando cambia modo/entry
+  // Reset editor cuando cambia modo/entry (y carga/limpia archivos por prop en edit)
   useEffect(() => {
-    if (mode === 'edit' && editing) {
-      setValues({ ...editing.values })
-      setSelectedListId(editing.listId) // 👈 respeta la lista del entry
-    } else {
-      setValues({})
-      // por defecto: la del punto o la primera del proyecto
-      setSelectedListId(point.listId || projectLists[0]?.id || '')
+    let alive = true
+
+    const run = async () => {
+      if (mode === 'edit' && editing) {
+        // valores y lista del entry que se está editando
+        setValues({ ...editing.values })
+        setSelectedListId(editing.listId)
+
+        // ⬇️ Cargar archivos ya adjuntos para cada propiedad tipo "file" de esa lista
+        const listProps = projectLists.find(pl => pl.id === editing.listId)?.properties ?? []
+        const fileProps = listProps.filter(p => p.type === 'file')
+
+        const acc: Record<string, PointFile[]> = {}
+        for (const fp of fileProps) {
+          const arr = await getFilesByEntryAndProp(editing.id, fp.id)
+          if (!alive) return
+          acc[fp.id] = arr
+        }
+        setFilesByProp(acc)
+      } else {
+        // modo crear: limpia valores y deja lista por defecto
+        setValues({})
+        setSelectedListId(point.listId || projectLists[0]?.id || '')
+        setFilesByProp({}) // no hay entryId todavía → no hay archivos
+      }
     }
-  }, [mode, editing, point.listId, projectLists])
+
+    run()
+    return () => { alive = false }
+  }, [mode, editing?.id, projectLists, point.listId])
+
 
   useEffect(() => {
     if (open) setPointName(point.name ?? '')
@@ -78,7 +102,6 @@ export default function PointFormModal({
     // 👇 notifica al padre que este punto cambió
     onPointUpdated?.(point.id)
   }
-
 
   const setValue = (k: string, v: any) => setValues(prev => ({ ...prev, [k]: v }))
 
@@ -276,6 +299,120 @@ export default function PointFormModal({
                   </div>
                 )
               }
+
+              if (p.type === 'file') {
+                const currentListFiles = filesByProp[p.id] ?? []
+                const canAttach = mode === 'edit' && editing // solo puedes adjuntar si ya existe el entry
+                
+                return (
+                  <div key={p.id} className="border rounded-md p-2 bg-black/10">
+                    <label className="block text-sm font-medium mb-1">
+                      {p.name}{p.required ? ' *' : ''} (archivos / fotos)
+                    </label>
+
+                    {/* Lista de archivos ya adjuntos */}
+                    {currentListFiles.length === 0 ? (
+                      <p className="text-xs text-gray-400 mb-2">Sin archivos adjuntos.</p>
+                    ) : (
+                      <ul className="mb-2 space-y-2">
+                        {currentListFiles.map(f => {
+                          const url = URL.createObjectURL(f.blob)
+                          const isImage = f.mime.startsWith('image/')
+                          return (
+                            <li key={f.id} className="flex items-start gap-2">
+                              <div className="w-16 h-16 flex-shrink-0 rounded bg-black/20 border border-white/10 overflow-hidden flex items-center justify-center text-[10px] text-gray-300">
+                                {isImage ? (
+                                  <img
+                                    src={url}
+                                    alt={f.filename}
+                                    className="object-cover w-full h-full"
+                                    onLoad={() => URL.revokeObjectURL(url)}
+                                  />
+                                ) : (
+                                  <span className="px-1 text-center break-all">{f.filename}</span>
+                                )}
+                              </div>
+
+                              <div className="flex-1 text-xs text-gray-200 break-all">
+                                <div>{f.filename}</div>
+                                <div className="text-[10px] text-gray-500">{f.mime}</div>
+                                <button
+                                  type="button"
+                                  className="mt-1 inline-block rounded border border-red-400 px-2 py-1 text-[10px] text-red-400 hover:bg-red-500/10"
+                                  onClick={async () => {
+                                    await deleteFile(f.id)
+                                    // recarga esta propiedad
+                                    const refreshed = await getFilesByEntryAndProp(editing!.id, p.id)
+                                    setFilesByProp(prev => ({ ...prev, [p.id]: refreshed }))
+                                  }}
+                                >
+                                  Eliminar
+                                </button>
+                              </div>
+                            </li>
+                          )
+                        })}
+                      </ul>
+                    )}
+
+                    {/* Input para agregar más archivos */}
+                    {canAttach ? (
+                      <div className="space-y-2">
+                        {/* opción cámara/foto (mobile-friendly) */}
+                        <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-white/20 bg-black/30 px-3 py-2 text-xs text-white hover:border-white/40">
+                          <span>📷 Tomar / subir foto</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            capture="environment"
+                            className="hidden"
+                            onChange={async (e) => {
+                              const file = e.currentTarget.files?.[0]
+                              if (!file || !editing) return
+                              await addFileToEntry({
+                                pointId: point.id,
+                                entryId: editing.id,
+                                propertyId: p.id,
+                                file,
+                              })
+                              const refreshed = await getFilesByEntryAndProp(editing.id, p.id)
+                              setFilesByProp(prev => ({ ...prev, [p.id]: refreshed }))
+                              e.currentTarget.value = ''
+                            }}
+                          />
+                        </label>
+
+                        {/* opción archivos genéricos (pdf, etc.) */}
+                        <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-white/20 bg-black/30 px-3 py-2 text-xs text-white hover:border-white/40">
+                          <span>📎 Adjuntar archivo</span>
+                          <input
+                            type="file"
+                            className="hidden"
+                            onChange={async (e) => {
+                              const file = e.currentTarget.files?.[0]
+                              if (!file || !editing) return
+                              await addFileToEntry({
+                                pointId: point.id,
+                                entryId: editing.id,
+                                propertyId: p.id,
+                                file,
+                              })
+                              const refreshed = await getFilesByEntryAndProp(editing.id, p.id)
+                              setFilesByProp(prev => ({ ...prev, [p.id]: refreshed }))
+                              e.currentTarget.value = ''
+                            }}
+                          />
+                        </label>
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-amber-400">
+                        Primero guarda el registro para poder adjuntar archivos.
+                      </p>
+                    )}
+                  </div>
+                )
+              }
+
 
               return <div key={id} className="text-sm text-amber-400">Tipo no soportado: {p.type}</div>
             })}

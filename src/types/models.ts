@@ -1,15 +1,15 @@
 export type ID = string;
 export type ISODate = string;
 
-export type DataType = 'text' | 'number' | 'date' | 'select' | 'multiselect'
+export type DataType =
+  | 'text'
+  | 'number'
+  | 'date'
+  | 'select'
+  | 'multiselect'
+  | 'file'
 
-export const DATA_TYPES: DataType[] = [
-    'text',
-    'number',
-    'date',
-    'select',
-    'multiselect'
-];
+const DATA_TYPES: DataType[] = ['text', 'number', 'date', 'select', 'multiselect', 'file']
 
 // LISTAS
 export interface List {
@@ -106,6 +106,18 @@ export interface Point {
   updatedAt: ISODate;
 }
 
+// types/models.ts (o donde tengas las interfaces)
+export interface PointFile {
+  id: string        // pk
+  pointId: string   // a qué punto pertenece (para facilitar queries)
+  entryId: string   // a qué registro pertenece
+  propertyId: string // qué propiedad 'file' estoy llenando (ej. "Pruebas")
+  filename: string
+  mime: string
+  blob: Blob        // la foto o archivo
+  createdAt: string // ISODate
+}
+
 export type ScalarValue = string | number | null;
 export type MultiValue = string[];
 
@@ -129,4 +141,16 @@ export interface PointEntry {
   values: Record<string, string | number | string[]>;
   createdAt: ISODate;
   updatedAt: ISODate;
+}
+
+// types/models.ts (o donde tengas las interfaces)
+export interface PointFile {
+  id: string        // pk
+  pointId: string   // a qué punto pertenece (para facilitar queries)
+  entryId: string   // a qué registro pertenece
+  propertyId: string // qué propiedad 'file' estoy llenando (ej. "Pruebas")
+  filename: string
+  mime: string
+  blob: Blob        // la foto o archivo
+  createdAt: ISODate // ISODate
 }

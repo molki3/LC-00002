@@ -22,7 +22,7 @@ import type { DataType } from '@/types/models'
  * Cada tipo define cómo se capturará el valor más adelante
  * (texto, número, fecha o selección múltiple).
  */
-const DATA_TYPES: DataType[] = ['text', 'number', 'date', 'select', 'multiselect']
+const DATA_TYPES: DataType[] = ['text', 'number', 'date', 'select', 'multiselect', 'file']
 
 /**
  * Tipo local utilizado para manejar las propiedades en el formulario
