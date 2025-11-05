@@ -179,6 +179,7 @@ export default function HomePage() {
           >
             +
           </Link>
+          
         </div>
 
         {/* Estados de carga / error */}
@@ -210,6 +211,14 @@ export default function HomePage() {
                     >
                       🗑
                     </button>
+                    <li key={list.id} className="flex items-center justify-between rounded">
+                      <Link
+                        href={`/lists/${list.id}/edit`}
+                        className="rounded-md border px-3 py-1 text-sm"
+                      >
+                        Editar
+                      </Link>
+                    </li>
                   </div>
                 </header>
 
