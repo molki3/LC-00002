@@ -23,7 +23,7 @@ import {
 import type { DataType } from '@/types/models'
 
 /** Tipos válidos de propiedades */
-const DATA_TYPES: DataType[] = ['text', 'number', 'date', 'select', 'multiselect']
+const DATA_TYPES: DataType[] = ['text', 'number', 'date', 'select', 'multiselect', 'file']
 
 /** Tipo local para manejar propiedades en el formulario */
 type UiProperty = {
@@ -192,7 +192,7 @@ export default function EditListPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl p-6">
+    <div className="mx-auto max-w-md sm:max-w-2xl p-4 sm:p-6">
       {/* Encabezado */}
       <div className="mb-2 flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Editar Lista</h1>
@@ -219,85 +219,87 @@ export default function EditListPage() {
             {props.map((row, idx) => (
               <div
                 key={row.key}
-                className="grid grid-cols-12 items-start gap-3 rounded-lg border p-3"
+                className="rounded-xl border border-white/10 bg-black/5 p-3 sm:p-4 shadow-sm"
               >
-                {/* Nombre de la propiedad */}
-                <div className="col-span-4">
-                  <label className="block text-xs font-medium">Nombre</label>
-                  <input
-                    className="mt-1 w-full rounded-md border px-3 py-2"
-                    placeholder={`Propiedad ${idx + 1}`}
-                    value={row.name}
-                    onChange={(e) => updateRow(row.key, { name: e.target.value })}
-                  />
-                </div>
-
-                {/* Tipo de dato */}
-                <div className="col-span-3">
-                  <label className="block text-xs font-medium">Tipo de datos</label>
-                  <select
-                    className="mt-1 w-full rounded-md border px-3 py-2"
-                    value={row.type}
-                    onChange={(e) =>
-                      updateRow(row.key, { type: e.target.value as DataType })
-                    }
-                  >
-                    {DATA_TYPES.map((t) => (
-                      <option key={t} value={t}>
-                        {t}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Checkbox: requerido */}
-                <div className="col-span-2 flex items-end">
-                  <label className="inline-flex items-center gap-2 text-sm">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-12 sm:items-end">
+                  {/* Nombre */}
+                  <div className="sm:col-span-5">
+                    <label className="block text-[11px] font-medium text-gray-600">Nombre</label>
                     <input
-                      type="checkbox"
-                      checked={row.required}
-                      onChange={(e) => updateRow(row.key, { required: e.target.checked })}
+                      className="mt-1 w-full rounded-md border border-white/10 bg-white/80 px-3 py-2 text-sm text-black outline-none focus:border-emerald-500"
+                      placeholder={`Propiedad ${idx + 1}`}
+                      value={row.name}
+                      onChange={(e) => updateRow(row.key, { name: e.target.value })}
                     />
-                    Requerido
-                  </label>
+                  </div>
+
+                  {/* Tipo de datos */}
+                  <div className="sm:col-span-3">
+                    <label className="block text-[11px] font-medium text-gray-600">Tipo de datos</label>
+                    <select
+                      className="mt-1 w-full rounded-md border border-white/10 bg-white/80 px-3 py-2 text-sm text-black outline-none focus:border-emerald-500"
+                      value={row.type}
+                      onChange={(e) => updateRow(row.key, { type: e.target.value as DataType })}
+                    >
+                      {DATA_TYPES.map((t) => (
+                        <option key={t} value={t}>{t}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Requerido */}
+                  <div className="sm:col-span-2">
+                    <label className="block text-[11px] font-medium text-gray-600">Requerido</label>
+                    <label className="mt-[6px] inline-flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={row.required}
+                        onChange={(e) => updateRow(row.key, { required: e.target.checked })}
+                        className="h-4 w-4 rounded border-white/30"
+                      />
+                      <span className="text-gray-800 sm:text-gray-200">Sí</span>
+                    </label>
+                  </div>
+
+                  {/* Acciones (+ / 🗑) */}
+                  <div className="flex items-end justify-end gap-2 sm:col-span-2">
+                    <button
+                      type="button"
+                      className="rounded-md border border-white/10 px-3 py-2 text-sm hover:border-white/30"
+                      onClick={() => addRow()}
+                      title="Agregar propiedad"
+                    >
+                      ＋
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-md border border-white/10 px-3 py-2 text-sm hover:border-red-400/40"
+                      onClick={() => removeRow(row.key)}
+                      title="Eliminar propiedad"
+                    >
+                      🗑
+                    </button>
+                  </div>
                 </div>
 
-                {/* Botones de agregar/eliminar propiedad */}
-                <div className="col-span-2 flex items-end justify-end gap-2">
-                  <button
-                    type="button"
-                    className="rounded-md border px-3 py-2 text-sm"
-                    onClick={() => addRow()}
-                    title="Agregar propiedad"
-                  >
-                    +
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded-md border px-3 py-2 text-sm"
-                    onClick={() => removeRow(row.key)}
-                    title="Eliminar propiedad"
-                  >
-                    🗑
-                  </button>
-                </div>
-
-                {/* Opciones si es select/multiselect */}
+                {/* Opciones para select/multiselect */}
                 {(row.type === 'select' || row.type === 'multiselect') && (
-                  <div className="col-span-12">
-                    <div className="text-xs font-medium">Opciones</div>
-                    <div className="mt-2 space-y-2">
+                  <div className="mt-3 border-t border-white/10 pt-3">
+                    <div className="text-[11px] font-medium uppercase tracking-wide text-gray-500 mb-2">
+                      Opciones
+                    </div>
+                    <div className="space-y-2">
                       {row.options.map((opt, i) => (
                         <div key={i} className="flex items-center gap-2">
                           <input
-                            className="w-full rounded-md border px-3 py-2"
+                            className="w-full rounded-md border border-white/10 bg-white/80 px-3 py-2 text-sm text-black outline-none focus:border-emerald-500"
                             placeholder={`Opción ${i + 1}`}
                             value={opt}
                             onChange={(e) => updateOption(row.key, i, e.target.value)}
                           />
                           <button
                             type="button"
-                            className="rounded-md border px-2 py-2 text-sm"
+                            className="rounded-md border border-white/10 px-2 py-2 text-sm hover:border-red-400/40"
                             onClick={() => removeOption(row.key, i)}
                           >
                             🗑
@@ -306,7 +308,7 @@ export default function EditListPage() {
                       ))}
                       <button
                         type="button"
-                        className="rounded-md border px-3 py-2 text-sm"
+                        className="rounded-md border border-white/10 px-3 py-2 text-sm hover:border-white/30"
                         onClick={() => addOption(row.key)}
                       >
                         Agregar opción
@@ -315,6 +317,7 @@ export default function EditListPage() {
                   </div>
                 )}
               </div>
+
             ))}
           </div>
         </div>
