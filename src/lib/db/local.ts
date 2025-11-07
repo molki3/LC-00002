@@ -392,6 +392,73 @@ export async function deleteProject(projectId: string) {
   })
 }
 
+export async function getProjectWithLists(projectId: string) {
+  const [project, pls] = await Promise.all([
+    db.projects.get(projectId),
+    db.projectLists.where({ projectId }).sortBy('order'),
+  ])
+  return { project, projectLists: pls }
+}
+
+export async function getAllLists() {
+  return db.lists.toArray()
+}
+
+export async function renameProject(projectId: string, name: string) {
+  await db.projects.update(projectId, { name: name.trim(), updatedAt: nowISO() })
+}
+
+/** Agrega una lista al proyecto (con snapshot de props si ya lo manejas) */
+export async function addListToProject(projectId: string, listId: string) {
+  const base = await db.lists.get(listId)
+  if (!base) throw new Error('Lista no encontrada')
+
+  // evita duplicados
+  const exists = await db.projectLists.where({ projectId, listId }).first()
+  if (exists) {
+    // si existe y estaba deshabilitada, re-habilita
+    await db.projectLists.update(exists.id, { enabled: true, updatedAt: nowISO() })
+    return exists.id
+  }
+
+  const order = (await db.projectLists.where({ projectId }).count()) || 0
+
+  const id = crypto.randomUUID()
+  await db.projectLists.add({
+    id,
+    projectId,
+    listId,
+    listName: base.name,        // si llevas snapshot
+    properties: [],             // o snapshot aquí si lo usas
+    order,
+    enabled: true,
+    createdAt: nowISO(),
+    updatedAt: nowISO(),
+  } as any)
+
+  return id
+}
+
+/** Desvincula “suave”: no borra puntos; solo deshabilita. */
+export async function unlinkListFromProject(projectListId: string) {
+  await db.projectLists.update(projectListId, { enabled: false, updatedAt: nowISO() })
+}
+
+/** Toggle habilitada */
+export async function toggleProjectListEnabled(projectListId: string, enabled: boolean) {
+  await db.projectLists.update(projectListId, { enabled, updatedAt: nowISO() })
+}
+
+/** Reordenar (drag & drop) — opcional */
+export async function reorderProjectLists(projectId: string, orderedIds: string[]) {
+  await db.transaction('rw', db.projectLists, async () => {
+    for (let i = 0; i < orderedIds.length; i++) {
+      await db.projectLists.update(orderedIds[i], { order: i, updatedAt: nowISO() })
+    }
+  })
+}
+
+
 // ASSETS — crear / leer / borrar
 // =========================================================
 
@@ -474,12 +541,12 @@ export async function createPdfAssetFromFile(projectId: string, file: File): Pro
 /*-----------
 ------ PUNTOS
 ---------- */ 
-db.version(8).stores({
+db.version(9).stores({
   lists: '++id, name, createdAt, updatedAt',
   properties: '++id, listId, order',
   options: '++id, propertyId, order',
   projects: '++id, name, createdAt, updatedAt',
-  projectLists: '++id, projectId, order',
+  projectLists: '++id, projectId, listId, order, enabled, updatedAt',
   assets: '++id, projectId',
   points: '++id, projectId, assetId, listId',
   pointEntries: '++id, pointId, listId, createdAt',

@@ -69,6 +69,8 @@ export interface ProjectList {
     listName: string;
     properties: SnapshotProperty[];
     order: number;
+    enabled?:boolean
+    updatedAt?: string
 }
 
 // ACTIVOS DEL PROYECTO

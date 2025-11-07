@@ -15,6 +15,7 @@ import PointFormModal from '@/components/points/PointFormModal'
 import PointsTable from '@/components/points/PointsTable'
 import { usePdfPreview } from '@/components/pdf/usePdfPreview'
 import { exportProjectCSV, exportProjectZip } from '@/lib/export'
+import Link from 'next/link'
 
 
 type ProjectWithLists = Project & { lists: ProjectList[] }
@@ -213,12 +214,13 @@ export default function ProjectDetailPage() {
           <p className="text-xs text-gray-500">
             Creado: {fmt(project.createdAt)} · Última edición: {fmt(project.updatedAt)}
           </p>
+          
         </div>
 
         <div className="flex items-center gap-2 p-5 md:p-0">
           {/* Subir imagen */}
           <label className="cursor-pointer rounded-md border px-3 py-2 text-sm">
-            Subir imagen
+            Imagen
             <input
               type="file"
               accept="image/*"
@@ -229,7 +231,7 @@ export default function ProjectDetailPage() {
 
           {/* Subir PDF */}
           <label className="cursor-pointer rounded-md border px-3 py-2 text-sm">
-            Subir PDF
+            PDF
             <input
               type="file"
               accept="application/pdf"
@@ -264,6 +266,7 @@ export default function ProjectDetailPage() {
             </details>
           </div>
 
+          
 
           {/* Eliminar proyecto */}
           <button
@@ -345,35 +348,50 @@ function ImageAssetCard({
   projectLists: ProjectList[]
   onDelete: () => void
 }) {
-  // ---- estado de puntos del asset ----
   const [points, setPoints] = useState<Point[]>([])
-
-  // ---- selección de lista activa para crear nuevos puntos ----
   const [activeListId, setActiveListId] = useState<string | undefined>(defaultListId)
 
-  // ---- modal unificado de REGISTROS (PointFormModal) ----
   const [entriesUIOpen, setEntriesUIOpen] = useState(false)
   const [entriesPoint, setEntriesPoint] = useState<Point | null>(null)
   const [entriesResetKey, setEntriesResetKey] = useState(0)
 
-  // Cargar puntos del asset
+  // 1) Solo listas habilitadas (assume enabled === true si viene undefined)
+  const enabledLists = useMemo(
+    () => projectLists.filter(pl => pl.enabled !== false),
+    [projectLists]
+  )
+
+  // 2) Listas que verá el modal: habilitadas + la lista del punto (aunque esté archivada)
+  const listsForModal = useMemo(() => {
+    if (!entriesPoint) return enabledLists
+    // Busca por listId (el snapshotId no existe en tu Point)
+    const its = projectLists.find(pl => pl.listId === entriesPoint.listId)
+    const includeIts = its && !enabledLists.some(pl => pl.id === its.id)
+    return includeIts ? [its!, ...enabledLists] : enabledLists
+  }, [enabledLists, projectLists, entriesPoint])
+
+
   useEffect(() => {
-    const load = async () => setPoints(await getPointsByAsset(asset.id))
-    load()
+    (async () => setPoints(await getPointsByAsset(asset.id)))()
   }, [asset.id])
 
-  // Crear punto desde clic en la imagen y abrir modal de registros
+  // Si no hay lista activa (o quedó una archivada), usa la primera habilitada
+  useEffect(() => {
+    if (!activeListId || !enabledLists.some(l => l.id === activeListId)) {
+      setActiveListId(enabledLists[0]?.id)
+    }
+  }, [enabledLists, activeListId])
+
   const handleAddPointRequest = async ({ x, y }: { x: number; y: number }) => {
-    const listId = activeListId ?? defaultListId
-    if (!listId) { alert('Selecciona una lista para el punto'); return }
+    const listId = activeListId ?? enabledLists[0]?.id
+    if (!listId) { alert('Selecciona una lista activa'); return }
 
     const newId = await addPoint({
       projectId,
       assetId: asset.id,
       listId,
-      x,
-      y,
-      values: {}, // ahora los valores viven en los "registros" del punto
+      x, y,
+      values: {},
     })
 
     const refreshed = await getPointsByAsset(asset.id)
@@ -387,21 +405,17 @@ function ImageAssetCard({
     setEntriesUIOpen(true)
   }
 
-  // Abrir modal de registros al hacer clic sobre un pin
   const handleSelectPoint = (p: Point) => {
     setEntriesPoint(p)
     setEntriesResetKey(k => k + 1)
     setEntriesUIOpen(true)
-    setActiveListId(p.listId) // opcional: reflejar lista del punto seleccionado
+    setActiveListId(prev => prev ?? p.listId) // opcional
   }
 
-  // Abrir modal desde la tabla
   const handleEditFromTable = (p: Point) => handleSelectPoint(p)
 
-  // Eliminar punto (desde la tabla)
   const handleDeletePoint = async (p: Point) => {
-    const ok = confirm('¿Eliminar este punto?')
-    if (!ok) return
+    if (!confirm('¿Eliminar este punto?')) return
     await deletePoint(p.id)
     setPoints(await getPointsByAsset(asset.id))
   }
@@ -410,8 +424,6 @@ function ImageAssetCard({
 
   return (
     <figure className="p-3 max-w-4xl w-full mx-auto">
-
-      {/* Lienzo interactivo */}
       <PointCanvas
         assetUrl={url}
         assetId={asset.id}
@@ -422,44 +434,39 @@ function ImageAssetCard({
 
       <figcaption className="mt-2 flex items-center justify-between text-xs text-gray-600">
         <span>
-          {asset.mime} · {asset.width}×{asset.height}px · {points.length} punto
-          {points.length !== 1 && 's'}
+          {asset.mime} · {asset.width}×{asset.height}px · {points.length} punto{points.length !== 1 && 's'}
         </span>
         <button className="rounded-md border px-2 py-1 bg-red-700 text-white" onClick={onDelete}>🗑</button>
       </figcaption>
 
-      {/* Tabla de puntos */}
       <PointsTable
         points={points}
-        projectLists={projectLists}
+        projectLists={enabledLists} 
         onEdit={handleEditFromTable}
         onDelete={handleDeletePoint}
       />
 
-      {/* Modal unificado de REGISTROS del punto */}
       {entriesPoint && (
         <PointFormModal
           open={entriesUIOpen}
           onClose={() => { setEntriesUIOpen(false); setEntriesPoint(null) }}
           title="Registros del punto"
           point={entriesPoint}
-          projectLists={projectLists}              // 👈 ahora se pasa la lista completa
+          projectLists={listsForModal}
           resetKey={entriesResetKey}
-          onDeletePoint={async () => {             // 👈 botón "Eliminar punto" en el modal
+          onDeletePoint={async () => {
             await deletePoint(entriesPoint.id)
             setEntriesUIOpen(false)
             setEntriesPoint(null)
             setPoints(await getPointsByAsset(asset.id))
           }}
-          onPointUpdated={async (id) => {           // 👈 nuevo callback
-            setPoints(await getPointsByAsset(asset.id))
-          }}
+          onPointUpdated={async () => setPoints(await getPointsByAsset(asset.id))}
         />
       )}
-
     </figure>
   )
 }
+
 
 /* =========================================================
    COMPONENTE: PdfAssetCard
@@ -474,40 +481,55 @@ function PdfAssetCard({ asset, projectId, defaultListId, projectLists, onDelete 
   const [entriesPoint, setEntriesPoint] = useState<Point | null>(null)
   const [entriesResetKey, setEntriesResetKey] = useState(0)
 
+  // 1) Solo listas habilitadas (assume enabled === true si viene undefined)
+  const enabledLists = useMemo(
+    () => projectLists.filter(pl => pl.enabled !== false),
+    [projectLists]
+  )
+
+  // 2) Listas que verá el modal: habilitadas + la lista del punto (aunque esté archivada)
+  const listsForModal = useMemo(() => {
+    if (!entriesPoint) return enabledLists
+    // Busca por listId (el snapshotId no existe en tu Point)
+    const its = projectLists.find(pl => pl.listId === entriesPoint.listId)
+    const includeIts = its && !enabledLists.some(pl => pl.id === its.id)
+    return includeIts ? [its!, ...enabledLists] : enabledLists
+  }, [enabledLists, projectLists, entriesPoint])
+
+
   useEffect(() => { (async () => setPoints(await getPointsByAsset(asset.id)))() }, [asset.id])
+
+  useEffect(() => {
+    if (!activeListId || !enabledLists.some(l => l.id === activeListId)) {
+      setActiveListId(enabledLists[0]?.id)
+    }
+  }, [enabledLists, activeListId])
 
   const { imageUrl, loading, error } = usePdfPreview(asset.blob, 1, 1200)
 
   const handleAddPointRequest = async ({ x, y }: { x: number; y: number }) => {
-    const listId = activeListId ?? defaultListId
-    if (!listId) {
-      alert('Selecciona una lista activa primero')
-      return
-    }
+    const listId = activeListId ?? enabledLists[0]?.id
+    if (!listId) { alert('Selecciona una lista activa primero'); return }
 
-    // 1) Crear punto y obtener su id
     const newId = await addPoint({
       projectId,
       assetId: asset.id,
       listId,
-      x,
-      y,
+      x, y,
       values: {},
-      // page: 1, // si manejas multipágina, guarda aquí la página actual
+      // page: 1,
     })
 
-    // 2) Refrescar y ubicar ese punto
     const refreshed = await getPointsByAsset(asset.id)
     setPoints(refreshed)
+
     const created = refreshed.find(p => p.id === newId)
     if (!created) return
 
-    // 3) Abrir el modal de registros directamente
     setEntriesPoint(created)
     setEntriesResetKey(k => k + 1)
     setEntriesUIOpen(true)
   }
-
 
   const handleSelectPoint = (p: Point) => {
     setEntriesPoint(p)
@@ -523,7 +545,6 @@ function PdfAssetCard({ asset, projectId, defaultListId, projectLists, onDelete 
 
   return (
     <figure className="p-3 max-w-4xl w-full mx-auto">
-
       {loading && <div className="text-sm text-gray-400">Renderizando PDF…</div>}
       {error && <div className="text-sm text-red-500">{error}</div>}
       {imageUrl && (
@@ -541,12 +562,11 @@ function PdfAssetCard({ asset, projectId, defaultListId, projectLists, onDelete 
         <button className="rounded-md border px-2 py-1 bg-red-700 text-white" onClick={onDelete}>🗑</button>
       </figcaption>
 
-      {/* 👇 Añade la tabla como en ImageAssetCard */}
       <PointsTable
         points={points}
-        projectLists={projectLists}
-        onEdit={handleSelectPoint}        // abre el modal de registros del punto
-        onDelete={handleDeletePoint}      // elimina el punto
+        projectLists={enabledLists}
+        onEdit={handleSelectPoint}
+        onDelete={handleDeletePoint}
       />
 
       {entriesPoint && (
@@ -555,7 +575,7 @@ function PdfAssetCard({ asset, projectId, defaultListId, projectLists, onDelete 
           onClose={() => { setEntriesUIOpen(false); setEntriesPoint(null) }}
           title="Registros del punto"
           point={entriesPoint}
-          projectLists={projectLists}
+          projectLists={listsForModal}  
           resetKey={entriesResetKey}
           onDeletePoint={async () => {
             await deletePoint(entriesPoint.id)
@@ -563,9 +583,7 @@ function PdfAssetCard({ asset, projectId, defaultListId, projectLists, onDelete 
             setEntriesPoint(null)
             setPoints(await getPointsByAsset(asset.id))
           }}
-          onPointUpdated={async (id) => {           // 👈 nuevo callback
-            setPoints(await getPointsByAsset(asset.id))
-          }}
+          onPointUpdated={async () => setPoints(await getPointsByAsset(asset.id))}
         />
       )}
     </figure>
