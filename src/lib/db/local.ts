@@ -691,3 +691,63 @@ export async function getFilesByEntry(entryId: string): Promise<PointFile[]> {
   return db.pointFiles.where('entryId').equals(entryId).toArray()
 }
 
+// util: obtiene el siguiente "order" para las projectLists de un proyecto
+async function nextProjectListOrder(projectId: string): Promise<number> {
+  const rows = await db.projectLists.where({ projectId }).toArray()
+  if (!rows.length) return 0
+  const max = Math.max(...rows.map(r => r.order ?? 0))
+  return max + 1
+}
+
+// --- construye snapshot desde la lista “maestra”
+export async function snapshotListProperties(listId: string): Promise<SnapshotProperty[]> {
+  const props = await db.properties.where('listId').equals(listId).toArray()
+  const opts  = await db.options.where('propertyId').anyOf(props.map(p => p.id)).toArray()
+
+  const byProp: Record<string, typeof opts> = {}
+  for (const o of opts) (byProp[o.propertyId] ||= []).push(o)
+
+  return props
+    .sort((a,b)=>a.order-b.order)
+    .map(p => ({
+      id: p.id,
+      name: p.name,
+      type: p.type,
+      required: p.required,
+      order: p.order,
+      options: (byProp[p.id] ?? [])
+        .sort((x,y)=>x.order - y.order)
+        .map(o => ({ id: o.id, value: o.value, order: o.order })),
+    }))
+}
+
+// --- agrega una lista al proyecto con snapshot completo
+export async function attachListToProject(projectId: string, listId: string) {
+  const base = await db.lists.get(listId)
+  if (!base) throw new Error('Lista no encontrada')
+
+  const snap  = await snapshotListProperties(listId)
+  const order = await nextProjectListOrder(projectId)
+
+  const pl: ProjectList = {
+    id: rid(),
+    projectId,
+    listId,
+    listName: base.name,
+    enabled: true,          // <- boolean (no 0/1)
+    properties: snap,
+    order,                  // <- requerido por tu modelo
+  }
+
+  await db.projectLists.add(pl)
+}
+
+// --- backfill por si ya existe el registro sin snapshot
+export async function ensureProjectListSnapshot(plId: string) {
+  const pl = await db.projectLists.get(plId)
+  if (!pl) return
+  if (!pl.properties || pl.properties.length === 0) {
+    const snap = await snapshotListProperties(pl.listId)
+    await db.projectLists.update(plId, { properties: snap, updatedAt: now() })
+  }
+}

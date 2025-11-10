@@ -10,6 +10,8 @@ import {
   unlinkListFromProject,
   toggleProjectListEnabled,
   reorderProjectLists,
+  attachListToProject,
+  ensureProjectListSnapshot,
 } from '@/lib/db/local'
 import type { List, Project, ProjectList } from '@/types/models'
 
@@ -27,16 +29,25 @@ export default function EditProjectPage() {
   const [addingId, setAddingId] = useState<string>('')
 
   const refresh = async () => {
+    // 1) Trae proyecto + listas y el catálogo de listas
     const [{ project, projectLists }, lists] = await Promise.all([
       getProjectWithLists(projectId),
       getAllLists(),
     ])
-    setProject(project ?? null)
-    setPls(projectLists.sort((a, b) => a.order - b.order))
+
+    // 2) Asegura que cada ProjectList tenga su snapshot de propiedades
+    await Promise.all((projectLists ?? []).map(pl => ensureProjectListSnapshot(pl.id)))
+
+    // 3) Vuelve a leer para obtener las listas ya actualizadas
+    const ensured = await getProjectWithLists(projectId)
+
+    setProject(ensured?.project ?? null)
+    setPls((ensured?.projectLists ?? []).sort((a, b) => a.order - b.order))
     setAllLists(lists)
-    setName(project?.name ?? '')
+    setName(ensured?.project?.name ?? '')
     setLoading(false)
   }
+
 
   useEffect(() => { refresh() }, [projectId])
 
@@ -54,7 +65,7 @@ export default function EditProjectPage() {
 
   const handleAddList = async () => {
     if (!addingId) return
-    await addListToProject(projectId, addingId)
+    await attachListToProject(projectId, addingId)   // ← en lugar de addListToProject
     setAddingId('')
     await refresh()
   }

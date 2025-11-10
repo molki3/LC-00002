@@ -113,7 +113,7 @@ export default function HomePage() {
       <section>
         {/* Header de sección + CTA */}
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-2xl font-medium">Proyectos</h2>
+          <h2 className="text-2xl font-medium">Mis Proyectos</h2>
           <Link
             href="/projects/new"
             className="rounded-md bg-emerald-500 px-4 py-2 text-white"
@@ -197,7 +197,7 @@ export default function HomePage() {
         {!loadingLists && lists.length === 0 ? (
           <div className="rounded border p-4 text-sm text-gray-600">
             Aún no tienes listas. Crea una desde el botón
-            <span className="mx-1 font-semibold">“+ Nueva Lista”</span>.
+            <span className="mx-1 font-semibold">+</span>.
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
