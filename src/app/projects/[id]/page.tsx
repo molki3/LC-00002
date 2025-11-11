@@ -16,6 +16,7 @@ import PointsTable from '@/components/points/PointsTable'
 import { usePdfPreview } from '@/components/pdf/usePdfPreview'
 import { exportProjectCSV, exportProjectZip } from '@/lib/export'
 import Link from 'next/link'
+import { exportAssetVisualWithTables } from '@/lib/export_visual'
 
 
 type ProjectWithLists = Project & { lists: ProjectList[] }
@@ -195,6 +196,14 @@ export default function ProjectDetailPage() {
     }
   }
 
+  // en src/lib/export_visual.ts
+  async function exportAllAssetsVisualWithTables(projectId: string) {
+    const assets = await getAssetsByProject(projectId)
+    for (let a of assets) {
+      await exportAssetVisualWithTables(projectId, a.id)
+    }
+  }
+
 
   const onDeleteAsset = async (id: string) => {
     await deleteAsset(id)
@@ -251,17 +260,27 @@ export default function ProjectDetailPage() {
                 <button
                   type="button"
                   className="block w-full rounded px-3 py-2 text-left text-sm hover:bg-white/10"
-                  onClick={() => exportProjectCSV(projectId)}
+                  onClick={() => exportAllAssetsVisualWithTables (projectId)}
                 >
-                  CSV (todas las tablas)
+                  Plano Visual (PNG)
                 </button>
                 <button
                   type="button"
                   className="block w-full rounded px-3 py-2 text-left text-sm hover:bg-white/10"
-                  onClick={() => exportProjectZip(projectId)}
+                  onClick={() => exportAllAssetsVisualWithTables (projectId)}
                 >
-                  ZIP (CSV + imágenes anotadas + manifest)
+                  Plano Visual (PDF)
                 </button>
+                <p className='block w-full rounded px-3 py-2 text-left text-sm hover:bg-white/10'>Elementos Individuales:</p>
+                {assets.map(a => (
+                  <button
+                    key={a.id}
+                    className="block w-full rounded px-3 py-2 text-left text-sm hover:bg-white/10"
+                    onClick={() => exportAssetVisualWithTables(projectId, a.id)}
+                  >
+                    - Exportar {a.mime}
+                  </button>
+                ))}
               </div>
             </details>
           </div>
