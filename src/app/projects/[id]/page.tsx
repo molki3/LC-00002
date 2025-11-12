@@ -16,7 +16,7 @@ import PointsTable from '@/components/points/PointsTable'
 import { usePdfPreview } from '@/components/pdf/usePdfPreview'
 import { exportProjectCSV, exportProjectZip } from '@/lib/export'
 import Link from 'next/link'
-import { exportAssetVisualWithTables } from '@/lib/export_visual'
+import { exportAllAssetsVisualWithTables, exportAssetVisualWithTablesPDF, exportAssetVisualWithTablesPNG } from '@/lib/export_visual'
 
 
 type ProjectWithLists = Project & { lists: ProjectList[] }
@@ -196,14 +196,6 @@ export default function ProjectDetailPage() {
     }
   }
 
-  // en src/lib/export_visual.ts
-  async function exportAllAssetsVisualWithTables(projectId: string) {
-    const assets = await getAssetsByProject(projectId)
-    for (let a of assets) {
-      await exportAssetVisualWithTables(projectId, a.id)
-    }
-  }
-
 
   const onDeleteAsset = async (id: string) => {
     await deleteAsset(id)
@@ -259,19 +251,12 @@ export default function ProjectDetailPage() {
               <div className="absolute right-0 z-10 mt-1 w-56 rounded-md border bg-background p-1 shadow">
                 <button
                   type="button"
-                  className="block w-full rounded px-3 py-2 text-left text-sm hover:bg-white/10"
-                  onClick={() => exportAllAssetsVisualWithTables (projectId)}
-                >
-                  Plano Visual (PNG)
-                </button>
-                <button
-                  type="button"
-                  className="block w-full rounded px-3 py-2 text-left text-sm hover:bg-white/10"
+                  className="block w-full rounded px-3 py-2 text-left text-sm hover:bg-white/10 cursor-pointer"
                   onClick={() => exportAllAssetsVisualWithTables (projectId)}
                 >
                   Plano Visual (PDF)
                 </button>
-                <p className='block w-full rounded px-3 py-2 text-left text-sm hover:bg-white/10'>Elementos Individuales:</p>
+                {/* <p className='block w-full rounded px-3 py-2 text-left text-sm hover:bg-white/10'>Elementos Individuales:</p>
                 {assets.map(a => (
                   <button
                     key={a.id}
@@ -280,7 +265,7 @@ export default function ProjectDetailPage() {
                   >
                     - Exportar {a.mime}
                   </button>
-                ))}
+                ))} */}
               </div>
             </details>
           </div>
