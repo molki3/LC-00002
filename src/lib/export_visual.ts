@@ -2,6 +2,7 @@
 'use client'
 
 import jsPDF from 'jspdf'
+//import html2canvas from 'html2canvas'
 import { getDocument } from 'pdfjs-dist'
 import { db, getProjectById, getAssetsByProject } from '@/lib/db/local'
 import type { Asset, Point, ProjectList, PointEntry, SnapshotProperty } from '@/types/models'
@@ -176,6 +177,195 @@ function drawTable(
   return cy - y
 }
 
+// Busca la <img> dentro del contenedor data-export-root="asset-<assetId>"
+// y devuelve un HTMLImageElement cargado con ese mismo src.
+async function getPreviewBitmapFromDOM(assetId: string): Promise<HTMLImageElement | null> {
+  const root = document.querySelector<HTMLDivElement>(`[data-export-root="asset-${assetId}"]`);
+  if (!root) return null;
+  const imgEl = root.querySelector<HTMLImageElement>('img');
+  if (!imgEl || !imgEl.src) return null;
+
+  // Carga una copia (para no “robar” el nodo del DOM).
+  return await new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => res(img);
+    img.onerror = rej;
+    img.src = imgEl.src;
+  });
+}
+
+export async function exportPdfPreviewVisualWithTablesPDF(
+  projectId: string,
+  assetId: string,
+  previewUrl: string,          // 👈 imageUrl que viene de usePdfPreview
+) {
+  const project = await getProjectById(projectId)
+  if (!project) {
+    alert('Proyecto no encontrado')
+    return
+  }
+
+  // 1) Datos de listas, puntos y registros
+  const [projectLists, allPoints] = await Promise.all([
+    db.projectLists.where({ projectId }).toArray(),
+    db.points.where({ assetId }).toArray(),
+  ])
+
+  const entries = await db.pointEntries
+    .where('pointId')
+    .anyOf(allPoints.map(p => p.id))
+    .toArray()
+
+  const entriesByPoint = new Map<string, PointEntry[]>()
+  entries.forEach(e => {
+    const arr = entriesByPoint.get(e.pointId) ?? []
+    arr.push(e)
+    entriesByPoint.set(e.pointId, arr)
+  })
+
+  const tables = buildTablesForAsset(allPoints, entriesByPoint, projectLists)
+
+  // 2) Usar EXACTAMENTE la misma imagen de preview que ve el usuario
+  const baseBitmap = await loadImage(previewUrl)
+  const baseW = baseBitmap.naturalWidth
+  const baseH = baseBitmap.naturalHeight
+
+  const pageWidth = baseW + PAD * 2
+
+  // Canvas para medir texto
+  const measCanvas = document.createElement('canvas')
+  const measCtx = measCanvas.getContext('2d')!
+  measCtx.font = '12px system-ui, sans-serif'
+
+  // Estimador de altura de tabla (igual idea que ya usas)
+  const estimateTableHeight = (tbl: Table): number => {
+    if (tbl.kind === 'heading' || tbl.columns.length === 0) {
+      return TITLE_H + GAP
+    }
+
+    const colW = Math.floor((baseW - 2) / tbl.columns.length)
+    const innerW = colW - CELL_PAD_X * 2
+
+    let h = TITLE_H + 8 + 28 // título + padding + header
+    for (const row of tbl.rows) {
+      let rowH = 0
+      tbl.columns.forEach(col => {
+        const text = row[col] ?? ''
+        const words = String(text).split(/\s+/)
+        let line = ''
+        let lines = 0
+        for (const w of words) {
+          const test = line ? line + ' ' + w : w
+          if (measCtx.measureText(test).width > innerW) {
+            if (line) lines++
+            line = w
+          } else {
+            line = test
+          }
+        }
+        if (line) lines++
+        const hCell = Math.max(18, lines * 16 + CELL_PAD_Y * 2)
+        rowH = Math.max(rowH, hCell)
+      })
+      h += rowH
+    }
+    return h + GAP
+  }
+
+  // 3) Construir páginas (canvas) con:
+  //    - Página 1: imagen de preview + pines
+  //    - Páginas siguientes: solo tablas
+  const pages: HTMLCanvasElement[] = []
+
+  let work = document.createElement('canvas')
+  work.width = pageWidth
+  work.height = MAX_PAGE_HEIGHT
+  let ctx = work.getContext('2d')!
+
+  ctx.fillStyle = '#ffffff'
+  ctx.fillRect(0, 0, work.width, work.height)
+
+  // Imagen + pines en la primera página
+  ctx.drawImage(baseBitmap, PAD, PAD, baseW, baseH)
+  drawPinsAndLabels(ctx, PAD, PAD, baseW, baseH, allPoints)
+
+  let y = PAD + baseH + PAD
+
+  const pushCurrent = () => {
+    const usedH = Math.min(
+      Math.max(y + PAD, PAD + baseH + PAD),
+      MAX_PAGE_HEIGHT
+    )
+    const final = document.createElement('canvas')
+    final.width = work.width
+    final.height = usedH
+    final.getContext('2d')!.drawImage(work, 0, 0)
+    pages.push(final)
+  }
+
+  const newTablesPage = () => {
+    // guarda la página actual
+    pushCurrent()
+    // nueva página SOLO de tablas
+    work = document.createElement('canvas')
+    work.width = pageWidth
+    work.height = MAX_PAGE_HEIGHT
+    ctx = work.getContext('2d')!
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, work.width, work.height)
+    y = PAD
+  }
+
+  const contentWidth = baseW
+
+  if (tables.length === 0) {
+    // solo el plano con pines
+    pushCurrent()
+  } else {
+    for (const tbl of tables) {
+      const need = estimateTableHeight(tbl)
+      if (y + need + PAD > MAX_PAGE_HEIGHT) {
+        newTablesPage()
+      }
+      const used = drawTable(ctx, PAD, y, tbl, contentWidth)
+      y += used + GAP
+    }
+    pushCurrent()
+  }
+
+  if (pages.length === 0) {
+    alert('No se generó ninguna página para exportar.')
+    return
+  }
+
+  // 4) Crear el PDF a partir de los canvas
+  const first = pages[0]
+  const pdf = new jsPDF({
+    orientation: pageWidth >= first.height ? 'l' : 'p',
+    unit: 'px',
+    format: [pageWidth, first.height],
+  })
+
+  pages.forEach((c, idx) => {
+    if (idx > 0) {
+      pdf.addPage([pageWidth, c.height], pageWidth >= c.height ? 'l' : 'p')
+    }
+    pdf.addImage(
+      c.toDataURL('image/png'),
+      'PNG',
+      0,
+      0,
+      pageWidth,
+      c.height
+    )
+  })
+
+  const blob = pdf.output('blob')
+  const name = `${project.name || 'proyecto'}_${assetId}.pdf`
+  downloadBlob(blob, name)
+}
+
+
 /* =============== construir tablas por punto =============== */
 function buildTablesForAsset(
   points: Point[],
@@ -342,152 +532,189 @@ function paginateCanvasIntoPages(
    RENDER CANVAS(ES) VISUALES (reutilizable para PNG o PDF)
    Devuelve: { canvases: Array<{canvas, filenameSuffix}> , projectName }
 ========================================================= */
+// Ajusta a tu valor real usado en el preview si no tienes meta guardada
+const DEFAULT_PREVIEW_WIDTH = 1200;
+
+// Reutilizable: rasteriza UNA página de PDF con el MISMO ancho/rotación del preview
+async function rasterizePdfPageExact(
+  pdfBlob: Blob,
+  pageNo: number,
+  targetWidth: number,
+  rotationOverride?: number
+): Promise<HTMLImageElement> {
+  // pdf.js
+  const pdf = await (getDocument({ data: await pdfBlob.arrayBuffer() }) as any).promise;
+  const page = await pdf.getPage(pageNo);
+
+  // Rotación: usa la misma que el preview (si la guardas), si no, usa la del PDF
+  const rotation = typeof rotationOverride === 'number' ? rotationOverride : (page.rotate || 0);
+
+  // Viewport base a escala 1
+  const base = page.getViewport({ scale: 1, rotation });
+  // Escala tal que el ancho sea EXACTAMENTE el del preview
+  const scale = targetWidth / (base.width as number);
+  const viewport = page.getViewport({ scale, rotation });
+
+  // Raster al canvas sin re-escalar luego
+  const c = document.createElement('canvas');
+  c.width  = Math.ceil(viewport.width as number);
+  c.height = Math.ceil(viewport.height as number);
+  const ctx = c.getContext('2d')!;
+  // Evita suavizado que pueda “mover” 1px el trazo
+  (ctx as any).imageSmoothingEnabled = false;
+
+  await page.render({ canvasContext: ctx as any, viewport }).promise;
+
+  // Convierte a <img> para usar su naturalWidth/Height
+  const img = await loadImage(c.toDataURL('image/png'));
+  return img;
+}
+
 async function renderVisualCanvasesForAsset(
   projectId: string,
   assetId: string
 ): Promise<{ canvases: { canvas: HTMLCanvasElement; filenameSuffix: string }[]; projectName: string }> {
-  const project = await getProjectById(projectId)
-  if (!project) throw new Error('Proyecto no encontrado')
+  const project = await getProjectById(projectId);
+  if (!project) throw new Error('Proyecto no encontrado');
 
   const [asset, projectListsAll] = await Promise.all([
     db.assets.get(assetId),
     db.projectLists.where({ projectId }).toArray(),
-  ])
-  if (!asset) throw new Error('Asset no encontrado')
+  ]);
+  if (!asset) throw new Error('Asset no encontrado');
 
-  const allPoints = await db.points.where({ assetId }).toArray()
-  const entries = await db.pointEntries.where('pointId').anyOf(allPoints.map(p => p.id)).toArray()
-  const entriesByPoint = new Map<string, PointEntry[]>()
+  // Puntos y registros agrupados
+  const allPoints = await db.points.where({ assetId }).toArray();
+  const entries = await db.pointEntries
+    .where('pointId')
+    .anyOf(allPoints.map(p => p.id))
+    .toArray();
+  const entriesByPoint = new Map<string, PointEntry[]>();
   entries.forEach(e => {
-    const arr = entriesByPoint.get(e.pointId) ?? []
-    arr.push(e)
-    entriesByPoint.set(e.pointId, arr)
-  })
+    const arr = entriesByPoint.get(e.pointId) ?? [];
+    arr.push(e);
+    entriesByPoint.set(e.pointId, arr);
+  });
 
-  // helper que construye UN canvas (imagen de base + pines + tablas)
-  // helper que construye UNO o VARIOS canvases (imagen de base + pines + tablas paginadas)
-  // dentro de renderVisualCanvasesForAsset, sustituye COMPLETO el renderOne por este:
-const renderOne = async (
-  baseBitmap: HTMLImageElement,
-  filenameSuffix: string,
-  pageFilter?: number
-): Promise<{ canvas: HTMLCanvasElement; filenameSuffix: string }[]> => {
-  const pagePoints = typeof pageFilter === 'number'
-    ? allPoints.filter(p => (p.page ?? 1) === pageFilter)
-    : allPoints;
+  // ===== helper: compone 1 o N páginas para un bitmap base (imagen o PDF rasterizado) =====
+  const renderOne = async (
+    baseBitmap: HTMLImageElement,
+    filenameSuffix: string,
+    pageFilter?: number,
+    skipPinDraw = false
+  ): Promise<{ canvas: HTMLCanvasElement; filenameSuffix: string }[]> => {
+    const pagePoints = typeof pageFilter === 'number'
+      ? allPoints.filter(p => (p.page ?? 1) === pageFilter)
+      : allPoints;
 
-  const tables = buildTablesForAsset(pagePoints, entriesByPoint, projectListsAll);
+    const tables = buildTablesForAsset(pagePoints, entriesByPoint, projectListsAll);
 
-  const baseW = baseBitmap.naturalWidth;
-  const baseH = baseBitmap.naturalHeight;
+    const baseW = baseBitmap.naturalWidth;
+    const baseH = baseBitmap.naturalHeight;
 
-  // offscreen para estimar
-  const off = document.createElement('canvas');
-  const offCtx = off.getContext('2d')!;
-  offCtx.font = '12px system-ui, sans-serif';
+    // Offscreen para medir textos
+    const meas = document.createElement('canvas').getContext('2d')!;
+    meas.font = '12px system-ui, sans-serif';
 
-  const pages: { canvas: HTMLCanvasElement; filenameSuffix: string }[] = [];
-  const pageWidth = baseW + PAD * 2;
+    const pages: { canvas: HTMLCanvasElement; filenameSuffix: string }[] = [];
+    const pageWidth = baseW + PAD * 2;
 
-  // ---- Página de trabajo
-  let work = document.createElement('canvas');
-  work.width = pageWidth;
-  work.height = MAX_PAGE_HEIGHT;
-  let ctx = work.getContext('2d')!;
-
-  // fondo + imagen + pines
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, work.width, work.height);
-  ctx.drawImage(baseBitmap, PAD, PAD, baseW, baseH);
-  drawPinsAndLabels(ctx, PAD, PAD, baseW, baseH, pagePoints);
-
-  // y arranca debajo de la imagen
-  let y = PAD + baseH + PAD;
-  let pageNo = 1;
-
-  const pushCurrent = () => {
-    // recorta a lo utilizado (mínimo un poco de margen)
-    const usedH = Math.min(Math.max(y + PAD, PAD + baseH + PAD), MAX_PAGE_HEIGHT);
-    const final = document.createElement('canvas');
-    final.width = work.width;
-    final.height = usedH;
-    final.getContext('2d')!.drawImage(work, 0, 0);
-    pages.push({ canvas: final, filenameSuffix: `${filenameSuffix}_p${pageNo++}` });
-  };
-
-  const newTablesPage = () => {
-    // antes de reemplazar la página, empuja la actual
-    pushCurrent();
-
-    // nueva página SOLO de tablas
-    work = document.createElement('canvas');
+    // Página “work”
+    let work = document.createElement('canvas');
     work.width = pageWidth;
-    work.height = MAX_PAGE_HEIGHT;
-    ctx = work.getContext('2d')!;
-    ctx.fillStyle = '#ffffff';
+    work.height = MAX_PAGE_HEIGHT; // define MAX_PAGE_HEIGHT = 16384 (o similar) arriba
+    let ctx = work.getContext('2d')!;
+    ctx.fillStyle = '#fff';
     ctx.fillRect(0, 0, work.width, work.height);
-    y = PAD;
-  };
 
-  // --- Si NO hay tablas, aún así devolvemos la página con la imagen
-  if (tables.length === 0) {
+    // Base + pines
+    ctx.drawImage(baseBitmap, PAD, PAD, baseW, baseH);
+    if (!skipPinDraw) {
+      drawPinsAndLabels(ctx, PAD, PAD, baseW, baseH, pagePoints)
+    }
+
+    let y = PAD + baseH + PAD;
+    let pageNo = 1;
+
+    const pushCurrent = () => {
+      const used = Math.min(Math.max(y + PAD, PAD + baseH + PAD), MAX_PAGE_HEIGHT);
+      const final = document.createElement('canvas');
+      final.width = work.width;
+      final.height = used;
+      final.getContext('2d')!.drawImage(work, 0, 0);
+      pages.push({ canvas: final, filenameSuffix: `${filenameSuffix}_p${pageNo++}` });
+    };
+
+    const newTablesPage = () => {
+      pushCurrent();
+      work = document.createElement('canvas');
+      work.width = pageWidth;
+      work.height = MAX_PAGE_HEIGHT;
+      ctx = work.getContext('2d')!;
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, work.width, work.height);
+      y = PAD; // páginas siguientes solo tablas
+    };
+
+    const contentWidth = baseW;
+
+    if (tables.length === 0) {
+      // aun sin tablas, empuja la página con la imagen y pines
+      pushCurrent();
+      return pages;
+    }
+
+    for (const tbl of tables) {
+      const need = estimateTableHeight(meas, tbl, contentWidth);
+      if (y + need + PAD > MAX_PAGE_HEIGHT) newTablesPage();
+      const used = drawTable(ctx, PAD, y, tbl, contentWidth);
+      y += used + GAP;
+    }
+
     pushCurrent();
     return pages;
-  }
+  };
 
-  // --- Colocar tablas con salto cuando no quepan
-  const contentWidth = baseW; // tablas alineadas al ancho de la imagen
-  for (const tbl of tables) {
-    const need = estimateTableHeight(offCtx, tbl, contentWidth);
-    if (y + need + PAD > MAX_PAGE_HEIGHT) {
-      // pasar a nueva página de tablas
-      newTablesPage();
-    }
-    const used = drawTable(ctx, PAD, y, tbl, contentWidth);
-    y += used + GAP;
-  }
+  const domBitmap = await getPreviewBitmapFromDOM(assetId);
 
-  // Empuja la última página usada
-  pushCurrent();
-  return pages;
-};
-
-
-
-  // genera canvases según tipo de asset
+  // ===== Genera canvases según tipo de asset =====
   if (asset.kind === 'image') {
+    if (domBitmap) {
+      const pages = await renderOne(domBitmap, `${asset.id}`);
+      return { canvases: pages, projectName: project.name || 'proyecto' };
+    }
+    // fallback a blob original (no debería desfasar en imágenes, pero por si acaso)
     const img = await loadImage(URL.createObjectURL(asset.blob));
     const pages = await renderOne(img, `${asset.id}`);
     return { canvases: pages, projectName: project.name || 'proyecto' };
-  } else if (asset.kind === 'pdf') {
-      const pdf = await (getDocument({ data: await asset.blob.arrayBuffer() }) as any).promise;
-      const total = pdf.numPages;
-      const out: { canvas: HTMLCanvasElement; filenameSuffix: string }[] = [];
-
-      for (let i = 1; i <= total; i++) {
-        const page = await pdf.getPage(i);
-        const rotation = (page.rotate || 0) as number;
-
-        const baseVp = page.getViewport({ scale: 1, rotation });
-        const targetWidth = PREVIEW_WIDTH || (baseVp.width as number);   // fallback
-        const scale = targetWidth / (baseVp.width as number);
-        const viewport = page.getViewport({ scale, rotation });
-
-        const c = document.createElement('canvas');
-        c.width  = Math.ceil(viewport.width as number);
-        c.height = Math.ceil(viewport.height as number);
-        const cctx = c.getContext('2d')!;
-        await page.render({ canvasContext: cctx as any, viewport }).promise;
-
-        const img = await loadImage(c.toDataURL('image/png'));
-        const pagesForThis = await renderOne(img, `${asset.id}_p${i}`, i);
-        out.push(...pagesForThis);
-      }
-      return { canvases: out, projectName: project.name || 'proyecto' };
-    } else {
-        throw new Error('Tipo de asset no soportado en export visual')
-  }
+    }
+  else if (asset.kind === 'pdf') {
+      // 1º intento: usa el mismo raster del preview (primera página mostrada)
+    if (domBitmap) {
+      const pages = await renderOne(domBitmap, `${asset.id}_p1`, 1);
+      return { canvases: pages, projectName: project.name || 'proyecto' };
+    }
+    // fallback: rasterizar PDF (si quieres varias páginas cuando no hay preview en DOM)
+    const pdf = await (getDocument({ data: await asset.blob.arrayBuffer() }) as any).promise;
+    const total = pdf.numPages;
+    const out: { canvas: HTMLCanvasElement; filenameSuffix: string }[] = [];
+    for (let i = 1; i <= total; i++) {
+      const page = await pdf.getPage(i);
+      const viewport = page.getViewport({ scale: 2, rotation: (page.rotate || 0) as number });
+      const c = document.createElement('canvas');
+      const cctx = c.getContext('2d')!;
+      c.width = Math.ceil(viewport.width as number);
+      c.height = Math.ceil(viewport.height as number);
+      await page.render({ canvasContext: cctx as any, viewport }).promise;
+      const img = await loadImage(c.toDataURL('image/png'));
+      const pagesForThis = await renderOne(img, `${asset.id}_p${i}`, i);
+      out.push(...pagesForThis);
+    }
+    return { canvases: out, projectName: project.name || 'proyecto' };
+  } else throw new Error('Tipo de asset no soportado en export visual');
 }
+
+
 
 /* =========================================================
    PNG (si quieres seguir teniendo salida PNG por asset)
@@ -499,6 +726,43 @@ export async function exportAssetVisualWithTablesPNG(projectId: string, assetId:
       canvas.toBlob(b => { downloadBlob(b!, `${projectName}_${filenameSuffix}.png`); res() }, 'image/png', 0.95)
     )
   }
+}
+
+/** Clona un nodo copiando estilos *computados* (color, background, etc.) para evitar oklab/oklch */
+function cloneWithComputedStyles(node: HTMLElement): HTMLElement {
+  const clone = node.cloneNode(true) as HTMLElement
+
+  const srcWalker = document.createTreeWalker(node, NodeFilter.SHOW_ELEMENT)
+  const dstWalker = document.createTreeWalker(clone, NodeFilter.SHOW_ELEMENT)
+
+  let src = srcWalker.currentNode as HTMLElement
+  let dst = dstWalker.currentNode as HTMLElement
+
+  const apply = (cs: CSSStyleDeclaration, el: HTMLElement) => {
+    // Colores principales
+    el.style.color = cs.color
+    el.style.backgroundColor = cs.backgroundColor
+    el.style.borderColor = cs.borderColor
+    el.style.outlineColor = cs.outlineColor
+
+    // Evita filtros y sombras exóticas
+    el.style.boxShadow = 'none'
+    el.style.filter = 'none'
+    // Tipografía y dimensiones básicas (opcional, suele ayudar)
+    el.style.font = cs.font
+    el.style.fontFamily = cs.fontFamily
+    el.style.fontSize = cs.fontSize
+    el.style.fontWeight = cs.fontWeight
+    el.style.lineHeight = cs.lineHeight
+  }
+
+  apply(getComputedStyle(src), dst)
+  while (srcWalker.nextNode() && dstWalker.nextNode()) {
+    src = srcWalker.currentNode as HTMLElement
+    dst = dstWalker.currentNode as HTMLElement
+    apply(getComputedStyle(src), dst)
+  }
+  return clone
 }
 
 /* =========================================================

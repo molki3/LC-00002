@@ -14,9 +14,7 @@ import PointCanvas from '@/components/points/PointCanvas'
 import PointFormModal from '@/components/points/PointFormModal'
 import PointsTable from '@/components/points/PointsTable'
 import { usePdfPreview } from '@/components/pdf/usePdfPreview'
-import { exportProjectCSV, exportProjectZip } from '@/lib/export'
-import Link from 'next/link'
-import { exportAllAssetsVisualWithTables, exportAssetVisualWithTablesPDF, exportAssetVisualWithTablesPNG } from '@/lib/export_visual'
+import { exportAllAssetsVisualWithTables, exportAssetVisualWithTablesPDF, exportPdfPreviewVisualWithTablesPDF } from '@/lib/export_visual'
 
 
 type ProjectWithLists = Project & { lists: ProjectList[] }
@@ -243,7 +241,7 @@ export default function ProjectDetailPage() {
 
           {/* Exportar CSV (placeholder) */}
           {/* Exportar */}
-          <div className="relative">
+          {/* <div className="relative">
             <details className="group">
               <summary className="cursor-pointer rounded-md border px-3 py-2 text-sm">
                 Exportar
@@ -265,10 +263,10 @@ export default function ProjectDetailPage() {
                   >
                     - Exportar {a.mime}
                   </button>
-                ))} */}
+                ))}
               </div>
             </details>
-          </div>
+          </div> */}
 
           
 
@@ -386,6 +384,8 @@ function ImageAssetCard({
     }
   }, [enabledLists, activeListId])
 
+  const viewportRef = useRef<HTMLDivElement|null>(null)
+
   const handleAddPointRequest = async ({ x, y }: { x: number; y: number }) => {
     const listId = activeListId ?? enabledLists[0]?.id
     if (!listId) { alert('Selecciona una lista activa'); return }
@@ -429,12 +429,22 @@ function ImageAssetCard({
   return (
     <figure className="p-3 max-w-4xl w-full mx-auto">
       <PointCanvas
+        ref={viewportRef}
         assetUrl={url}
         assetId={asset.id}
         points={points}
         onAddPoint={handleAddPointRequest}
         onSelectPoint={handleSelectPoint}
       />
+
+      <div className="mt-2 flex gap-2">
+        <button
+          className="rounded border px-2 py-1"
+          onClick={() => exportAssetVisualWithTablesPDF(projectId, asset.id)}
+        >
+          Plano visual (PDF)
+        </button>
+      </div>
 
       <figcaption className="mt-2 flex items-center justify-between text-xs text-gray-600">
         <span>
@@ -509,6 +519,8 @@ function PdfAssetCard({ asset, projectId, defaultListId, projectLists, onDelete 
     }
   }, [enabledLists, activeListId])
 
+  const viewportRef = useRef<HTMLDivElement|null>(null)
+
   const { imageUrl, loading, error } = usePdfPreview(asset.blob, 1, 1200)
 
   const handleAddPointRequest = async ({ x, y }: { x: number; y: number }) => {
@@ -553,6 +565,7 @@ function PdfAssetCard({ asset, projectId, defaultListId, projectLists, onDelete 
       {error && <div className="text-sm text-red-500">{error}</div>}
       {imageUrl && (
         <PointCanvas
+          ref={viewportRef}
           assetUrl={imageUrl}
           assetId={asset.id}
           points={points}
@@ -560,6 +573,19 @@ function PdfAssetCard({ asset, projectId, defaultListId, projectLists, onDelete 
           onSelectPoint={handleSelectPoint}
         />
       )}
+
+      <div className="mt-2 flex gap-2">
+        <button
+          className="rounded border px-2 py-1"
+          onClick={() => {
+            if (imageUrl) {
+              exportPdfPreviewVisualWithTablesPDF(projectId, asset.id, imageUrl)
+            }
+          }}
+        >
+          Plano visual (PDF)
+        </button>
+      </div>
 
       <figcaption className="mt-2 flex items-center justify-between text-xs text-gray-600">
         <span>{asset.mime} · {asset.pageCount ?? 0} pág. · {points.length} punto{points.length !== 1 && 's'}</span>

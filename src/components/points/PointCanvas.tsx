@@ -1,5 +1,5 @@
 'use client'
-import React, { useRef, useState } from 'react'
+import React, { useRef, useState, useImperativeHandle, forwardRef } from 'react'
 
 type Pin = { id: string; x: number; y: number; name?: string }
 
@@ -12,15 +12,17 @@ type Props = {
   onDeletePoint?: (p: any) => void
 }
 
-export default function PointCanvas({
+function PointCanvasInner({
   assetUrl,
+  assetId,
   points,
   onAddPoint,
   onSelectPoint,
   onDeletePoint,
-}: Props) {
+}: Props, ref: React.Ref<HTMLDivElement | null>) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const imgRef = useRef<HTMLImageElement | null>(null)
+  useImperativeHandle(ref, () => containerRef.current!, [])
 
   const [natural, setNatural] = useState({ w: 0, h: 0 })
   const [scale, setScale] = useState(1)
@@ -273,11 +275,12 @@ export default function PointCanvas({
         <button type="button" className="rounded border px-2 py-1 text-sm" onClick={zoomOut}>−</button>
         <span className="text-xs tabular-nums">{scale.toFixed(2)}x</span>
         <button type="button" className="rounded border px-2 py-1 text-sm" onClick={zoomIn}>＋</button>
-        <button type="button" className="rounded border px-2 py-1 text-sm" onClick={resetView}>Ajustar</button>
+        <button type="button" className="rounded border px-2 py-1 text-sm" onClick={resetView}>Ajustar</button> 
       </div>
 
       <div
         ref={containerRef}
+        data-export-root={`asset-${assetId}`}
         className={`relative h-[70vh] w-full overflow-hidden rounded border bg-black/5 touch-none ${isGrabbing ? 'cursor-grabbing' : 'cursor-grab'}`}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
@@ -347,3 +350,6 @@ export default function PointCanvas({
     </div>
   )
 }
+
+const PointCanvas = forwardRef(PointCanvasInner)
+export default PointCanvas;
